@@ -168,9 +168,12 @@ app.get('/api/chain/commitment/:taskId', async (req, res) => {
 app.get('/api/chain/stats', async (_req, res) => {
   if (!sealContract) return res.status(503).json({ error: 'On-chain not configured' });
   try {
-    const [commitmentCount, executionCount, owner] = await Promise.all([
+    const [commitmentCount, executionCount, disputeCount, disputeBond, disputePeriod, owner] = await Promise.all([
       sealContract.commitmentCount(),
       sealContract.executionCount(),
+      sealContract.disputeCount(),
+      sealContract.disputeBond(),
+      sealContract.disputePeriod(),
       sealContract.owner()
     ]);
     res.json({
@@ -178,6 +181,9 @@ app.get('/api/chain/stats', async (_req, res) => {
       chain: 'base-sepolia',
       commitmentCount: Number(commitmentCount),
       executionCount: Number(executionCount),
+      disputeCount: Number(disputeCount),
+      disputeBond: ethers.formatEther(disputeBond),
+      disputePeriod: Number(disputePeriod),
       owner
     });
   } catch (err: any) {
@@ -211,13 +217,25 @@ app.post('/api/pipeline-onchain', async (req, res) => {
     // Stage 04: Execute in TEE
     const { txData, executionAttestation } = await agent.executeInTEE(input, reasoning, attestation);
 
+    // Stage 04b: Submit execution ON-CHAIN (closes the loop)
+    const execHashBytes = ethers.id(executionAttestation.executionHash);
+    const txDataBytes = ethers.toUtf8Bytes(JSON.stringify(txData));
+    const sigBytes = ethers.toUtf8Bytes(executionAttestation.signature);
+
+    const execTx = await sealContract.executeTask(
+      taskIdBytes, txDataBytes, execHashBytes, sigBytes
+    );
+    const execReceipt = await execTx.wait();
+
     res.json({
       inputHash: reasoning.inputHash,
       reasoningHash: attestation.reasoningHash,
       commitment,
       onChain: {
-        txHash: receipt.hash,
-        blockNumber: receipt.blockNumber,
+        commitTxHash: receipt.hash,
+        commitBlock: receipt.blockNumber,
+        executeTxHash: execReceipt.hash,
+        executeBlock: execReceipt.blockNumber,
         contractAddress: CONTRACT_ADDRESS,
         chain: 'base-sepolia'
       },
@@ -227,6 +245,91 @@ app.post('/api/pipeline-onchain', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Pipeline+onchain error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── On-chain: Execute task ──────────────────────────────
+app.post('/api/chain/execute-task', async (req, res) => {
+  if (!sealContract) return res.status(503).json({ error: 'On-chain not configured' });
+  try {
+    const { taskId, txData, executionHash, signature } = req.body;
+    const taskIdBytes = ethers.id(taskId);
+    const execHashBytes = ethers.id(executionHash);
+    const txDataBytes = ethers.toUtf8Bytes(JSON.stringify(txData));
+    const sigBytes = ethers.toUtf8Bytes(signature);
+
+    const tx = await sealContract.executeTask(taskIdBytes, txDataBytes, execHashBytes, sigBytes);
+    const receipt = await tx.wait();
+    res.json({ txHash: receipt.hash, blockNumber: receipt.blockNumber });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── On-chain: Dispute resolution ────────────────────────
+app.post('/api/chain/dispute/raise', async (req, res) => {
+  if (!sealContract) return res.status(503).json({ error: 'On-chain not configured' });
+  try {
+    const { agentId, taskId, evidenceHash, bondEth } = req.body;
+    const agentIdBytes = ethers.id(agentId);
+    const taskIdBytes = ethers.id(taskId);
+    const evidenceHashBytes = ethers.id(evidenceHash);
+    const bondWei = ethers.parseEther(bondEth || '0.005');
+
+    const tx = await sealContract.raiseDispute(agentIdBytes, taskIdBytes, evidenceHashBytes, { value: bondWei });
+    const receipt = await tx.wait();
+    // Parse disputeId from event
+    const event = receipt.logs.find((l: any) => l.fragment?.name === 'DisputeRaised');
+    const disputeId = event ? Number(event.args[0]) : null;
+    res.json({ txHash: receipt.hash, blockNumber: receipt.blockNumber, disputeId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/chain/dispute/vote', async (req, res) => {
+  if (!sealContract) return res.status(503).json({ error: 'On-chain not configured' });
+  try {
+    const { disputeId, inFavorOfSlash } = req.body;
+    const tx = await sealContract.voteOnDispute(disputeId, inFavorOfSlash);
+    const receipt = await tx.wait();
+    res.json({ txHash: receipt.hash, blockNumber: receipt.blockNumber });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/chain/dispute/resolve', async (req, res) => {
+  if (!sealContract) return res.status(503).json({ error: 'On-chain not configured' });
+  try {
+    const { disputeId } = req.body;
+    const tx = await sealContract.resolveDispute(disputeId);
+    const receipt = await tx.wait();
+    res.json({ txHash: receipt.hash, blockNumber: receipt.blockNumber });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/chain/dispute/:disputeId', async (req, res) => {
+  if (!sealContract) return res.status(503).json({ error: 'On-chain not configured' });
+  try {
+    const result = await sealContract.getDispute(Number(req.params.disputeId));
+    const statusNames = ['None', 'Active', 'Resolved', 'Rejected'];
+    res.json({
+      status: statusNames[Number(result.status)] || 'Unknown',
+      agentId: result.agentId,
+      taskId: result.taskId,
+      challenger: result.challenger,
+      bond: ethers.formatEther(result.bond),
+      evidenceHash: result.evidenceHash,
+      votesFor: Number(result.votesFor),
+      votesAgainst: Number(result.votesAgainst),
+      deadline: Number(result.deadline),
+      resolved: result.resolved
+    });
+  } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -260,14 +363,19 @@ app.listen(PORT, () => {
   console.log(`   Endpoints:`);
   console.log(`     POST /api/hash-inputs`);
   console.log(`     POST /api/pipeline`);
+  console.log(`     POST /api/pipeline-onchain`);
   console.log(`     POST /api/demo/treasury`);
   console.log(`     POST /api/demo/agent-to-agent`);
   console.log(`     POST /api/demo/credential-proof`);
   console.log(`     POST /api/verify-attestation`);
-  console.log(`     POST /api/pipeline-onchain`);
   console.log(`     POST /api/chain/submit-commitment`);
+  console.log(`     POST /api/chain/execute-task`);
   console.log(`     GET  /api/chain/commitment/:taskId`);
-  console.log(`     GET  /api/chain/stats\n`);
+  console.log(`     GET  /api/chain/stats`);
+  console.log(`     POST /api/chain/dispute/raise`);
+  console.log(`     POST /api/chain/dispute/vote`);
+  console.log(`     POST /api/chain/dispute/resolve`);
+  console.log(`     GET  /api/chain/dispute/:disputeId\n`);
 });
 
 export default app;

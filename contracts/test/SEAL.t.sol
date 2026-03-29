@@ -1,269 +1,384 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test, console} from "forge-std/Test.sol";
-import {SEAL} from "../src/SEAL.sol";
+import "forge-std/Test.sol";
+import "../src/SEAL.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract SEALTest is Test {
     SEAL public seal;
-    address public deployer;
-    address public agent1Owner;
-    address public agent2Owner;
 
-    bytes32 constant AGENT_1 = keccak256("agent-treasury-001");
-    bytes32 constant AGENT_2 = keccak256("agent-worker-001");
+    bytes32 constant AGENT_1 = keccak256("agent-001");
     bytes32 constant TASK_1 = keccak256("task-001");
     bytes32 constant TASK_2 = keccak256("task-002");
+    bytes32 constant MERKLE_ROOT = keccak256("merkle-root");
+    bytes constant ATTESTATION_QUOTE = abi.encodePacked(
+        "eyJwYXlsb2FkIjp7Im1vZHVsZV9pZCI6InNlYWwtZmx1ZW5jZS10ZWUifX0=",
+        "extra-padding-to-reach-64-bytes"
+    );
+    bytes32 constant EXEC_HASH = keccak256("execution-output-hash");
+    bytes constant TX_DATA = abi.encodePacked("tx-data-here");
+    bytes constant SIG_DATA = abi.encodePacked("sig-data-here");
+
+    address challenger = address(0xC0FFEE);
+    address voter1 = address(0xBEEF);
+    address voter2 = address(0xCAFE);
+    address voter3 = address(0xFACE);
 
     function setUp() public {
-        deployer = address(this);
-        agent1Owner = makeAddr("agent1Owner");
-        agent2Owner = makeAddr("agent2Owner");
+        // Deploy via UUPS proxy
+        SEAL implementation = new SEAL();
+        bytes memory initData = abi.encodeCall(
+            SEAL.initialize,
+            (0.01 ether, 0.005 ether, 1 days)
+        );
+        ERC1967Proxy proxy = new ERC1967Proxy(address(implementation), initData);
+        seal = SEAL(payable(address(proxy)));
 
-        seal = new SEAL(0.01 ether);
-
-        // Fund agent owners
-        vm.deal(agent1Owner, 10 ether);
-        vm.deal(agent2Owner, 10 ether);
+        // Fund test accounts
+        vm.deal(challenger, 10 ether);
+        vm.deal(voter1, 1 ether);
+        vm.deal(voter2, 1 ether);
+        vm.deal(voter3, 1 ether);
     }
 
-    // ── Agent Registration ───────────────────────────────
+    // ── Agent Registration ──────────────────────────────
 
-    function test_RegisterAgent() public {
-        vm.prank(agent1Owner);
+    function test_registerAgent() public {
         seal.registerAgent{value: 0.01 ether}(AGENT_1);
-
-        (bool registered, uint256 nonce, uint256 stake, bool slashed, address owner) = seal.agents(AGENT_1);
+        (bool registered,,,, address agentOwner) = seal.agents(AGENT_1);
         assertTrue(registered);
-        assertEq(nonce, 0);
-        assertEq(stake, 0.01 ether);
-        assertFalse(slashed);
-        assertEq(owner, agent1Owner);
+        assertEq(agentOwner, address(this));
     }
 
-    function test_RevertDoubleRegister() public {
-        vm.prank(agent1Owner);
+    function test_revert_registerAgent_alreadyRegistered() public {
         seal.registerAgent{value: 0.01 ether}(AGENT_1);
-
-        vm.prank(agent1Owner);
         vm.expectRevert("SEAL: already registered");
         seal.registerAgent{value: 0.01 ether}(AGENT_1);
     }
 
-    function test_RevertInsufficientStake() public {
-        vm.prank(agent1Owner);
+    function test_revert_registerAgent_insufficientStake() public {
         vm.expectRevert("SEAL: insufficient stake");
         seal.registerAgent{value: 0.001 ether}(AGENT_1);
     }
 
-    // ── Commit Flow ──────────────────────────────────────
+    // ── Commitment Submission ───────────────────────────
 
-    function test_SubmitCommitment() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-        bytes memory attestationQuote = _mockAttestationQuote();
+    function test_submitCommitment() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        (
+            bool committed,
+            bool executed,
+            bytes32 merkleRoot,
+            uint256 nonce,
+            ,
+            uint256 timestamp,
+            address submitter,
+            bytes32 executionHash
+        ) = seal.commitments(TASK_1);
 
-        seal.submitCommitment(TASK_1, merkleRoot, attestationQuote, 1, block.timestamp);
-
-        (bool committed, bool executed, bytes32 storedRoot, , , uint256 timestamp, , ) = seal.commitments(TASK_1);
         assertTrue(committed);
         assertFalse(executed);
-        assertEq(storedRoot, merkleRoot);
-        assertGt(timestamp, 0);
+        assertEq(merkleRoot, MERKLE_ROOT);
+        assertEq(nonce, 1);
+        assertEq(submitter, address(this));
+        assertEq(executionHash, bytes32(0));
         assertEq(seal.commitmentCount(), 1);
     }
 
-    function test_RevertDoubleCommit() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-        bytes memory quote = _mockAttestationQuote();
-
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
-
+    function test_revert_submitCommitment_alreadyCommitted() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
         vm.expectRevert("SEAL: already committed");
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 2, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 2, block.timestamp);
     }
 
-    function test_RevertEmptyAttestation() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-
+    function test_revert_submitCommitment_emptyAttestation() public {
         vm.expectRevert("SEAL: empty attestation");
-        seal.submitCommitment(TASK_1, merkleRoot, "", 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, "", 1, block.timestamp);
     }
 
-    // ── Attestation Verification ─────────────────────────
+    // ── Attestation Verification ────────────────────────
 
-    function test_VerifyAttestation() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-        bytes memory quote = _mockAttestationQuote();
-
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
-
-        bool valid = seal.verifyAttestation(TASK_1, quote);
+    function test_verifyAttestation_valid() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        bool valid = seal.verifyAttestation(TASK_1, ATTESTATION_QUOTE);
         assertTrue(valid);
     }
 
-    function test_VerifyAttestationFailsWrongQuote() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-        bytes memory quote = _mockAttestationQuote();
-
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
-
-        bytes memory wrongQuote = abi.encodePacked("wrong-attestation-data-that-is-long-enough-for-minimum-check-64bytes");
+    function test_verifyAttestation_wrongQuote() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        bytes memory wrongQuote = abi.encodePacked(
+            "WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_123"
+        );
         bool valid = seal.verifyAttestation(TASK_1, wrongQuote);
         assertFalse(valid);
     }
 
-    function test_VerifyAttestationFailsNotCommitted() public {
-        bytes memory quote = _mockAttestationQuote();
-        bool valid = seal.verifyAttestation(TASK_1, quote);
+    function test_verifyAttestation_notCommitted() public {
+        bool valid = seal.verifyAttestation(TASK_1, ATTESTATION_QUOTE);
         assertFalse(valid);
     }
 
-    // ── Execute Flow ─────────────────────────────────────
+    // ── Task Execution ──────────────────────────────────
 
-    function test_ExecuteAfterCommit() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-        bytes memory quote = _mockAttestationQuote();
+    function test_executeTask_afterCommitment() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
 
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
-
-        bytes memory txData = abi.encode("transfer", address(0x1), 100);
-        bytes32 execHash = keccak256(txData);
-        bytes memory sig = abi.encodePacked(keccak256("mock-signature"));
-
-        seal.executeTask(TASK_1, txData, execHash, sig);
-
-        (bool committed, bool executed, , , , , , ) = seal.commitments(TASK_1);
-        assertTrue(committed);
+        (,bool executed,,,,, bytes32 executionHash) = seal.getCommitment(TASK_1);
         assertTrue(executed);
+        assertEq(executionHash, EXEC_HASH);
         assertEq(seal.executionCount(), 1);
     }
 
-    function test_RevertExecuteWithoutCommit() public {
-        bytes memory txData = abi.encode("transfer", address(0x1), 100);
-        bytes32 execHash = keccak256(txData);
-        bytes memory sig = abi.encodePacked(keccak256("mock-signature"));
-
+    function test_revert_executeTask_notCommitted() public {
         vm.expectRevert("SEAL: not committed");
-        seal.executeTask(TASK_1, txData, execHash, sig);
+        seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
     }
 
-    function test_RevertDoubleExecute() public {
-        bytes32 merkleRoot = keccak256("merkle-root-data");
-        bytes memory quote = _mockAttestationQuote();
-
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
-
-        bytes memory txData = abi.encode("transfer", address(0x1), 100);
-        bytes32 execHash = keccak256(txData);
-        bytes memory sig = abi.encodePacked(keccak256("mock-signature"));
-
-        seal.executeTask(TASK_1, txData, execHash, sig);
-
+    function test_revert_executeTask_alreadyExecuted() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
         vm.expectRevert("SEAL: already executed");
-        seal.executeTask(TASK_1, txData, execHash, sig);
+        seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
     }
 
-    // ── Full Pipeline: Commit → Verify → Execute ────────
+    // ── Full Pipeline ───────────────────────────────────
 
-    function test_FullPipeline() public {
-        // Register agent
-        vm.prank(agent1Owner);
-        seal.registerAgent{value: 0.05 ether}(AGENT_1);
+    function test_fullPipeline_commitThenExecute() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
 
-        // Submit commitment
-        bytes32 merkleRoot = keccak256("full-pipeline-merkle");
-        bytes memory quote = _mockAttestationQuote();
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
-
-        // Verify attestation
-        bool valid = seal.verifyAttestation(TASK_1, quote);
+        bool valid = seal.verifyAttestation(TASK_1, ATTESTATION_QUOTE);
         assertTrue(valid);
 
-        // Execute
-        bytes memory txData = abi.encode("rebalance", address(0xDA0), 1000);
-        bytes32 execHash = keccak256(txData);
-        bytes memory sig = abi.encodePacked(keccak256("enclave-sig"));
-        seal.executeTask(TASK_1, txData, execHash, sig);
+        seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
 
-        // Verify final state
-        (bool committed, bool executed, bytes32 root, , uint256 ts, , bytes32 storedExecHash) = seal.getCommitment(TASK_1);
+        (bool committed, bool executed,,,,,) = seal.getCommitment(TASK_1);
         assertTrue(committed);
         assertTrue(executed);
-        assertEq(root, merkleRoot);
-        assertEq(storedExecHash, execHash);
-        assertGt(ts, 0);
+        assertEq(seal.commitmentCount(), 1);
+        assertEq(seal.executionCount(), 1);
     }
 
-    // ── Slashing ─────────────────────────────────────────
+    // ── Decentralized Dispute Resolution ────────────────
 
-    function test_SlashAgent() public {
-        // Register agent
-        vm.prank(agent1Owner);
-        seal.registerAgent{value: 1 ether}(AGENT_1);
+    function test_raiseDispute() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
 
-        // Commit a task
-        bytes32 merkleRoot = keccak256("fraudulent-reasoning");
-        bytes memory quote = _mockAttestationQuote();
-        seal.submitCommitment(TASK_1, merkleRoot, quote, 1, block.timestamp);
+        bytes32 evidenceHash = keccak256("fraud-evidence");
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, evidenceHash);
 
-        // Owner slashes
-        uint256 ownerBalanceBefore = deployer.balance;
-        seal.slashAgent(AGENT_1, TASK_1);
+        (
+            SEAL.DisputeStatus status,
+            bytes32 agentId,
+            bytes32 taskId,
+            address ch,
+            uint256 bond,
+            bytes32 evHash,
+            uint256 votesFor,
+            uint256 votesAgainst,
+            uint256 deadline,
+            bool resolved
+        ) = seal.getDispute(disputeId);
 
-        (bool registered, , uint256 stake, bool slashed, ) = seal.agents(AGENT_1);
-        assertTrue(registered);
+        assertEq(uint256(status), uint256(SEAL.DisputeStatus.Active));
+        assertEq(agentId, AGENT_1);
+        assertEq(taskId, TASK_1);
+        assertEq(ch, challenger);
+        assertEq(bond, 0.005 ether);
+        assertEq(evHash, evidenceHash);
+        assertEq(votesFor, 0);
+        assertEq(votesAgainst, 0);
+        assertEq(deadline, block.timestamp + 1 days);
+        assertFalse(resolved);
+    }
+
+    function test_revert_raiseDispute_insufficientBond() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        vm.prank(challenger);
+        vm.expectRevert("SEAL: insufficient dispute bond");
+        seal.raiseDispute{value: 0.001 ether}(AGENT_1, TASK_1, keccak256("evidence"));
+    }
+
+    function test_voteOnDispute() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
+
+        vm.prank(voter1);
+        seal.voteOnDispute(disputeId, true);
+
+        vm.prank(voter2);
+        seal.voteOnDispute(disputeId, false);
+
+        (,,,,,,uint256 votesFor, uint256 votesAgainst,,) = seal.getDispute(disputeId);
+        assertEq(votesFor, 1);
+        assertEq(votesAgainst, 1);
+    }
+
+    function test_revert_voteOnDispute_alreadyVoted() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
+
+        vm.prank(voter1);
+        seal.voteOnDispute(disputeId, true);
+
+        vm.prank(voter1);
+        vm.expectRevert("SEAL: already voted");
+        seal.voteOnDispute(disputeId, true);
+    }
+
+    function test_revert_voteOnDispute_periodEnded() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
+
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(voter1);
+        vm.expectRevert("SEAL: voting period ended");
+        seal.voteOnDispute(disputeId, true);
+    }
+
+    function test_resolveDispute_slashAgent() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
+
+        // 2 votes for slash, 1 against
+        vm.prank(voter1);
+        seal.voteOnDispute(disputeId, true);
+        vm.prank(voter2);
+        seal.voteOnDispute(disputeId, true);
+        vm.prank(voter3);
+        seal.voteOnDispute(disputeId, false);
+
+        // Warp past deadline
+        vm.warp(block.timestamp + 2 days);
+
+        uint256 challengerBalBefore = challenger.balance;
+        seal.resolveDispute(disputeId);
+
+        // Agent should be slashed
+        (,, uint256 stake, bool slashed,) = seal.agents(AGENT_1);
         assertTrue(slashed);
         assertEq(stake, 0);
-        assertEq(deployer.balance, ownerBalanceBefore + 1 ether);
+
+        // Challenger gets bond back + half of slashed stake
+        uint256 challengerBalAfter = challenger.balance;
+        assertEq(challengerBalAfter - challengerBalBefore, 0.005 ether + 0.05 ether);
+
+        (SEAL.DisputeStatus status,,,,,,,,,) = seal.getDispute(disputeId);
+        assertEq(uint256(status), uint256(SEAL.DisputeStatus.Resolved));
     }
 
-    function test_RevertSlashNonOwner() public {
-        vm.prank(agent1Owner);
-        seal.registerAgent{value: 1 ether}(AGENT_1);
+    function test_resolveDispute_rejectDispute() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
 
-        bytes memory quote = _mockAttestationQuote();
-        seal.submitCommitment(TASK_1, keccak256("data"), quote, 1, block.timestamp);
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
 
-        vm.prank(agent2Owner);
-        vm.expectRevert("SEAL: not owner");
-        seal.slashAgent(AGENT_1, TASK_1);
+        // 1 for, 2 against
+        vm.prank(voter1);
+        seal.voteOnDispute(disputeId, true);
+        vm.prank(voter2);
+        seal.voteOnDispute(disputeId, false);
+        vm.prank(voter3);
+        seal.voteOnDispute(disputeId, false);
+
+        vm.warp(block.timestamp + 2 days);
+        seal.resolveDispute(disputeId);
+
+        // Agent NOT slashed
+        (,, uint256 stake, bool slashed,) = seal.agents(AGENT_1);
+        assertFalse(slashed);
+        assertEq(stake, 0.1 ether);
+
+        // Bond goes to agent owner (this contract)
+        (SEAL.DisputeStatus status,,,,,,,,,) = seal.getDispute(disputeId);
+        assertEq(uint256(status), uint256(SEAL.DisputeStatus.Rejected));
     }
 
-    function test_RevertDoubleSlash() public {
-        vm.prank(agent1Owner);
-        seal.registerAgent{value: 1 ether}(AGENT_1);
+    function test_revert_resolveDispute_periodNotEnded() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
 
-        bytes memory quote = _mockAttestationQuote();
-        seal.submitCommitment(TASK_1, keccak256("data"), quote, 1, block.timestamp);
+        vm.prank(challenger);
+        uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
 
-        seal.slashAgent(AGENT_1, TASK_1);
+        vm.expectRevert("SEAL: voting period not ended");
+        seal.resolveDispute(disputeId);
+    }
+
+    // ── Emergency Slash (owner-only) ────────────────────
+
+    function test_emergencySlash() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        uint256 ownerBalBefore = address(this).balance;
+        seal.emergencySlash(AGENT_1, TASK_1);
+        uint256 ownerBalAfter = address(this).balance;
+
+        (,, uint256 stake, bool slashed,) = seal.agents(AGENT_1);
+        assertTrue(slashed);
+        assertEq(stake, 0);
+        assertEq(ownerBalAfter - ownerBalBefore, 0.1 ether);
+    }
+
+    function test_revert_emergencySlash_notOwner() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+
+        vm.prank(address(0xDA0));
+        vm.expectRevert();
+        seal.emergencySlash(AGENT_1, TASK_1);
+    }
+
+    function test_revert_emergencySlash_alreadySlashed() public {
+        seal.registerAgent{value: 0.1 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.emergencySlash(AGENT_1, TASK_1);
 
         vm.expectRevert("SEAL: already slashed");
-        seal.slashAgent(AGENT_1, TASK_1);
+        seal.emergencySlash(AGENT_1, TASK_1);
     }
 
-    // ── View Helpers ─────────────────────────────────────
+    // ── Pending Execution ───────────────────────────────
 
-    function test_IsPendingExecution() public {
-        bytes memory quote = _mockAttestationQuote();
-        seal.submitCommitment(TASK_1, keccak256("data"), quote, 1, block.timestamp);
-
+    function test_isPendingExecution() public {
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
         assertTrue(seal.isPendingExecution(TASK_1));
 
-        bytes memory txData = abi.encode("exec");
-        seal.executeTask(TASK_1, txData, keccak256(txData), abi.encodePacked(keccak256("sig")));
-
+        seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
         assertFalse(seal.isPendingExecution(TASK_1));
     }
 
-    // ── Helpers ──────────────────────────────────────────
+    // ── UUPS Proxy ──────────────────────────────────────
 
-    function _mockAttestationQuote() internal pure returns (bytes memory) {
-        // Simulates a Nitro-compat base64-encoded attestation (>64 bytes)
-        return abi.encodePacked(
-            '{"format":"aws-nitro-v1-mock","payload":{"module_id":"seal-fluence-tee",',
-            '"pcrs":{"0":"mock-pcr0"},"user_data":"mock"},"signature":"0xdead"}'
-        );
+    function test_proxyOwnership() public view {
+        assertEq(seal.owner(), address(this));
+    }
+
+    function test_proxyConfig() public view {
+        assertEq(seal.minStake(), 0.01 ether);
+        assertEq(seal.disputeBond(), 0.005 ether);
+        assertEq(seal.disputePeriod(), 1 days);
     }
 
     // Allow contract to receive ETH (for slash payouts)

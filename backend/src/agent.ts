@@ -363,7 +363,7 @@ Provide your reasoning and execution plan as JSON:
     if (!this.gemini) {
       throw new Error('Gemini API key not configured. Set GEMINI_API_KEY in .env');
     }
-    const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
     });

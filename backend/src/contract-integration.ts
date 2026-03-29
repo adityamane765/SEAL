@@ -91,20 +91,22 @@ export class ContractIntegration {
 }
 
 /**
- * SEAL Contract ABI — matches deployed contract on Base Sepolia
- * Address: 0x09c1Fb86E0E78861cfa85A026c12e042087DE08e
+ * SEAL v2 Contract ABI — UUPS proxy on Base Sepolia
+ * Proxy: 0x9af9C6fe2a845354EcC3bDCe1af9c427Fb42Ed70
  */
 export const SEAL_CONTRACT_ABI = [
   // Events
   "event CommitmentSubmitted(bytes32 indexed taskId, bytes32 merkleRoot, uint256 nonce, uint256 timestamp)",
   "event TaskExecuted(bytes32 indexed taskId, bytes32 executionHash, uint256 timestamp)",
-  "event AttestationVerified(bytes32 indexed taskId, bool valid)",
-  "event AgentRegistered(bytes32 indexed agentId, address indexed owner, uint256 stake)",
+  "event AgentRegistered(bytes32 indexed agentId, address indexed agentOwner, uint256 stake)",
   "event AgentSlashed(bytes32 indexed agentId, bytes32 indexed taskId, uint256 slashedAmount)",
+  "event DisputeRaised(uint256 indexed disputeId, bytes32 indexed agentId, bytes32 indexed taskId, address challenger, uint256 bond, uint256 deadline)",
+  "event DisputeVoted(uint256 indexed disputeId, address indexed voter, bool inFavorOfSlash)",
+  "event DisputeResolved(uint256 indexed disputeId, bool slashed, uint256 votesFor, uint256 votesAgainst)",
 
   // Agent registry
   "function registerAgent(bytes32 agentId) payable",
-  "function agents(bytes32 agentId) view returns (bool registered, uint256 nonce, uint256 stake, bool slashed, address owner)",
+  "function agents(bytes32 agentId) view returns (bool registered, uint256 nonce, uint256 stake, bool slashed, address agentOwner)",
 
   // Commit-attest-execute
   "function submitCommitment(bytes32 taskId, bytes32 merkleRoot, bytes calldata attestationQuote, uint256 nonce, uint256 timestamp)",
@@ -118,11 +120,21 @@ export const SEAL_CONTRACT_ABI = [
   "function isPendingExecution(bytes32 taskId) view returns (bool)",
   "function incrementNonce(bytes32 agentId)",
 
+  // Dispute resolution
+  "function raiseDispute(bytes32 agentId, bytes32 taskId, bytes32 evidenceHash) payable returns (uint256 disputeId)",
+  "function voteOnDispute(uint256 disputeId, bool inFavorOfSlash)",
+  "function resolveDispute(uint256 disputeId)",
+  "function getDispute(uint256 disputeId) view returns (uint8 status, bytes32 agentId, bytes32 taskId, address challenger, uint256 bond, bytes32 evidenceHash, uint256 votesFor, uint256 votesAgainst, uint256 deadline, bool resolved)",
+  "function disputeCount() view returns (uint256)",
+  "function disputeBond() view returns (uint256)",
+  "function disputePeriod() view returns (uint256)",
+
   // Admin
-  "function slashAgent(bytes32 agentId, bytes32 taskId)",
+  "function emergencySlash(bytes32 agentId, bytes32 taskId)",
   "function owner() view returns (address)",
   "function commitmentCount() view returns (uint256)",
-  "function executionCount() view returns (uint256)"
+  "function executionCount() view returns (uint256)",
+  "function minStake() view returns (uint256)"
 ];
 
 export default ContractIntegration;

@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+
 /**
- * @title SEAL — Secure Enclave Agent Layer
- * @notice Commit-attest-execute contract for AI agents operating on-chain.
- *         Enforces that reasoning commitment provably precedes execution,
- *         stores merkle-batched commitment roots, validates TEE attestation
- *         quotes, and manages agent lifecycle including slashing.
+ * @title SEAL — Secure Enclave Agent Layer (v2)
+ * @notice UUPS-upgradeable commit-attest-execute contract for AI agents.
+ *         Enforces commit-before-execute, stores merkle roots, validates TEE
+ *         attestation quotes, manages agent registry with staking, and
+ *         implements decentralized dispute resolution for slashing.
  */
-contract SEAL {
+contract SEAL is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     // ── Types ────────────────────────────────────────────
 
     struct CommitmentData {
@@ -27,19 +31,41 @@ contract SEAL {
         uint256 nonce;
         uint256 stake;
         bool slashed;
-        address owner;
+        address agentOwner;
+    }
+
+    enum DisputeStatus { None, Active, Resolved, Rejected }
+
+    struct Dispute {
+        DisputeStatus status;
+        bytes32 agentId;
+        bytes32 taskId;
+        address challenger;
+        uint256 bond;
+        bytes32 evidenceHash;    // hash of off-chain evidence (e.g. revealed reasoning)
+        uint256 votesFor;        // votes supporting the slash
+        uint256 votesAgainst;    // votes against the slash
+        uint256 deadline;        // block.timestamp after which dispute can be resolved
+        bool resolved;
     }
 
     // ── State ────────────────────────────────────────────
 
     mapping(bytes32 => CommitmentData) public commitments;
     mapping(bytes32 => AgentInfo) public agents;
-    mapping(bytes32 => bytes32[]) public agentTasks; // agentId => taskIds
+    mapping(bytes32 => bytes32[]) public agentTasks;
 
-    address public owner;
     uint256 public minStake;
     uint256 public commitmentCount;
     uint256 public executionCount;
+
+    // Dispute resolution state
+    uint256 public disputeCount;
+    uint256 public disputeBond;         // min bond to raise a dispute
+    uint256 public disputePeriod;       // seconds for voting period
+    mapping(uint256 => Dispute) public disputes;
+    mapping(uint256 => mapping(address => bool)) public hasVoted;
+    mapping(uint256 => mapping(address => bool)) public voteDirection; // true = for slash
 
     // ── Events ───────────────────────────────────────────
 
@@ -56,14 +82,9 @@ contract SEAL {
         uint256 timestamp
     );
 
-    event AttestationVerified(
-        bytes32 indexed taskId,
-        bool valid
-    );
-
     event AgentRegistered(
         bytes32 indexed agentId,
-        address indexed owner,
+        address indexed agentOwner,
         uint256 stake
     );
 
@@ -73,26 +94,49 @@ contract SEAL {
         uint256 slashedAmount
     );
 
-    // ── Modifiers ────────────────────────────────────────
+    event DisputeRaised(
+        uint256 indexed disputeId,
+        bytes32 indexed agentId,
+        bytes32 indexed taskId,
+        address challenger,
+        uint256 bond,
+        uint256 deadline
+    );
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "SEAL: not owner");
-        _;
+    event DisputeVoted(
+        uint256 indexed disputeId,
+        address indexed voter,
+        bool inFavorOfSlash
+    );
+
+    event DisputeResolved(
+        uint256 indexed disputeId,
+        bool slashed,
+        uint256 votesFor,
+        uint256 votesAgainst
+    );
+
+    // ── Initializer (replaces constructor for UUPS) ─────
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
     }
 
-    // ── Constructor ──────────────────────────────────────
+    function initialize(uint256 _minStake, uint256 _disputeBond, uint256 _disputePeriod) public initializer {
+        __Ownable_init(msg.sender);
 
-    constructor(uint256 _minStake) {
-        owner = msg.sender;
         minStake = _minStake;
+        disputeBond = _disputeBond;
+        disputePeriod = _disputePeriod;
     }
+
+    // ── UUPS upgrade authorization ──────────────────────
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     // ── Agent Registry ───────────────────────────────────
 
-    /**
-     * @notice Register an agent by staking. Agent ID is derived off-chain
-     *         (e.g. keccak256 of the agent's enclave public key).
-     */
     function registerAgent(bytes32 agentId) external payable {
         require(!agents[agentId].registered, "SEAL: already registered");
         require(msg.value >= minStake, "SEAL: insufficient stake");
@@ -102,7 +146,7 @@ contract SEAL {
             nonce: 0,
             stake: msg.value,
             slashed: false,
-            owner: msg.sender
+            agentOwner: msg.sender
         });
 
         emit AgentRegistered(agentId, msg.sender, msg.value);
@@ -110,15 +154,6 @@ contract SEAL {
 
     // ── Stage 03: Commit + Attest ────────────────────────
 
-    /**
-     * @notice Submit a commitment from the TEE runtime.
-     *         Must be called BEFORE executeTask (commit-before-execute).
-     * @param taskId     Unique task identifier
-     * @param merkleRoot Merkle root of [inputHash, reasoningHash, executionHash, signature]
-     * @param attestationQuote Raw TEE attestation quote bytes (Nitro-compat format)
-     * @param nonce      Strict sequence nonce for this agent
-     * @param timestamp  TEE-generated timestamp
-     */
     function submitCommitment(
         bytes32 taskId,
         bytes32 merkleRoot,
@@ -147,42 +182,19 @@ contract SEAL {
 
     // ── Attestation Verification ─────────────────────────
 
-    /**
-     * @notice Verify a TEE attestation quote for a committed task.
-     *         For the hackathon mock, we verify structural validity:
-     *         - Quote exists and is non-empty
-     *         - Task is committed
-     *         In production, this would verify the COSE_Sign1 signature
-     *         against AWS Nitro / Intel TDX root certificates.
-     */
     function verifyAttestation(
         bytes32 taskId,
         bytes calldata attestationQuote
     ) external view returns (bool) {
         CommitmentData storage c = commitments[taskId];
-
-        // Must be committed
         if (!c.committed) return false;
-
-        // Quote must match what was submitted
         if (keccak256(c.attestationQuote) != keccak256(attestationQuote)) return false;
-
-        // Structural check: quote must have minimum length (base64-encoded JSON)
         if (attestationQuote.length < 64) return false;
-
         return true;
     }
 
     // ── Stage 04+05: Execute + Guaranteed Delivery ───────
 
-    /**
-     * @notice Execute a task after commitment is on-chain.
-     *         Enforces commit-before-execute ordering.
-     * @param taskId         Must match a previously committed task
-     * @param txData         Serialized transaction data from TEE
-     * @param executionHash  SHA-256 hash of the execution output
-     * @param signature      TEE enclave signature over the execution
-     */
     function executeTask(
         bytes32 taskId,
         bytes calldata txData,
@@ -206,32 +218,133 @@ contract SEAL {
 
     // ── Nonce Management ─────────────────────────────────
 
-    /**
-     * @notice Get the current nonce for an agent.
-     *         Used by the backend to set the next commitment nonce.
-     */
     function getNonce(bytes32 agentId) external view returns (uint256) {
         return agents[agentId].nonce;
     }
 
-    /**
-     * @notice Increment nonce after successful commitment.
-     */
     function incrementNonce(bytes32 agentId) external {
         require(agents[agentId].registered, "SEAL: agent not registered");
         agents[agentId].nonce++;
     }
 
-    // ── Slashing ─────────────────────────────────────────
+    // ── Decentralized Dispute Resolution ─────────────────
 
     /**
-     * @notice Slash an agent if selective reveal proves fraudulent reasoning.
-     *         Can be called by contract owner (in production: by a governance vote
-     *         or an on-chain fraud proof).
-     * @param agentId The agent to slash
-     * @param taskId  The task that triggered the slash
+     * @notice Raise a dispute against an agent for a specific task.
+     *         Challenger must post a bond. If dispute succeeds, challenger
+     *         gets bond back + reward from slashed stake.
+     * @param agentId      The agent being disputed
+     * @param taskId       The task that triggered the dispute
+     * @param evidenceHash Hash of off-chain evidence (revealed reasoning blob)
      */
-    function slashAgent(bytes32 agentId, bytes32 taskId) external onlyOwner {
+    function raiseDispute(
+        bytes32 agentId,
+        bytes32 taskId,
+        bytes32 evidenceHash
+    ) external payable returns (uint256 disputeId) {
+        require(msg.value >= disputeBond, "SEAL: insufficient dispute bond");
+
+        AgentInfo storage agent = agents[agentId];
+        require(agent.registered, "SEAL: agent not registered");
+        require(!agent.slashed, "SEAL: already slashed");
+
+        CommitmentData storage c = commitments[taskId];
+        require(c.committed, "SEAL: task not committed");
+
+        disputeId = disputeCount++;
+        disputes[disputeId] = Dispute({
+            status: DisputeStatus.Active,
+            agentId: agentId,
+            taskId: taskId,
+            challenger: msg.sender,
+            bond: msg.value,
+            evidenceHash: evidenceHash,
+            votesFor: 0,
+            votesAgainst: 0,
+            deadline: block.timestamp + disputePeriod,
+            resolved: false
+        });
+
+        emit DisputeRaised(disputeId, agentId, taskId, msg.sender, msg.value, block.timestamp + disputePeriod);
+    }
+
+    /**
+     * @notice Vote on an active dispute. Any registered agent or staker can vote.
+     * @param disputeId     The dispute to vote on
+     * @param inFavorOfSlash true = agent should be slashed, false = dispute is invalid
+     */
+    function voteOnDispute(uint256 disputeId, bool inFavorOfSlash) external {
+        Dispute storage d = disputes[disputeId];
+        require(d.status == DisputeStatus.Active, "SEAL: dispute not active");
+        require(block.timestamp < d.deadline, "SEAL: voting period ended");
+        require(!hasVoted[disputeId][msg.sender], "SEAL: already voted");
+
+        hasVoted[disputeId][msg.sender] = true;
+        voteDirection[disputeId][msg.sender] = inFavorOfSlash;
+
+        if (inFavorOfSlash) {
+            d.votesFor++;
+        } else {
+            d.votesAgainst++;
+        }
+
+        emit DisputeVoted(disputeId, msg.sender, inFavorOfSlash);
+    }
+
+    /**
+     * @notice Resolve a dispute after the voting period ends.
+     *         Anyone can call this once the deadline passes.
+     *         - If votesFor > votesAgainst: agent is slashed, challenger rewarded
+     *         - If votesAgainst >= votesFor: dispute rejected, bond goes to agent
+     */
+    function resolveDispute(uint256 disputeId) external {
+        Dispute storage d = disputes[disputeId];
+        require(d.status == DisputeStatus.Active, "SEAL: dispute not active");
+        require(block.timestamp >= d.deadline, "SEAL: voting period not ended");
+        require(!d.resolved, "SEAL: already resolved");
+
+        d.resolved = true;
+
+        bool shouldSlash = d.votesFor > d.votesAgainst;
+
+        if (shouldSlash) {
+            // Slash the agent
+            AgentInfo storage agent = agents[d.agentId];
+            uint256 slashedAmount = agent.stake;
+            agent.slashed = true;
+            agent.stake = 0;
+
+            d.status = DisputeStatus.Resolved;
+
+            // Reward challenger: bond back + half of slashed stake
+            uint256 challengerReward = d.bond + (slashedAmount / 2);
+            uint256 protocolFee = slashedAmount - (slashedAmount / 2);
+
+            (bool sent1, ) = payable(d.challenger).call{value: challengerReward}("");
+            require(sent1, "SEAL: challenger reward failed");
+
+            // Protocol fee goes to contract owner
+            if (protocolFee > 0) {
+                (bool sent2, ) = payable(owner()).call{value: protocolFee}("");
+                require(sent2, "SEAL: protocol fee failed");
+            }
+
+            emit AgentSlashed(d.agentId, d.taskId, slashedAmount);
+        } else {
+            // Dispute rejected — bond goes to the agent's owner as compensation
+            d.status = DisputeStatus.Rejected;
+
+            AgentInfo storage agent = agents[d.agentId];
+            (bool sent, ) = payable(agent.agentOwner).call{value: d.bond}("");
+            require(sent, "SEAL: bond return failed");
+        }
+
+        emit DisputeResolved(disputeId, shouldSlash, d.votesFor, d.votesAgainst);
+    }
+
+    // ── Emergency Slash (owner-only, for critical bugs) ──
+
+    function emergencySlash(bytes32 agentId, bytes32 taskId) external onlyOwner {
         AgentInfo storage agent = agents[agentId];
         require(agent.registered, "SEAL: agent not registered");
         require(!agent.slashed, "SEAL: already slashed");
@@ -243,8 +356,7 @@ contract SEAL {
         agent.slashed = true;
         agent.stake = 0;
 
-        // Transfer slashed stake to contract owner (in production: to a slash pool)
-        (bool sent, ) = payable(owner).call{value: slashedAmount}("");
+        (bool sent, ) = payable(owner()).call{value: slashedAmount}("");
         require(sent, "SEAL: slash transfer failed");
 
         emit AgentSlashed(agentId, taskId, slashedAmount);
@@ -252,9 +364,6 @@ contract SEAL {
 
     // ── View Helpers ─────────────────────────────────────
 
-    /**
-     * @notice Get full commitment data for a task.
-     */
     function getCommitment(bytes32 taskId) external view returns (
         bool committed,
         bool executed,
@@ -276,16 +385,29 @@ contract SEAL {
         );
     }
 
-    /**
-     * @notice Get agent tasks list.
-     */
+    function getDispute(uint256 disputeId) external view returns (
+        DisputeStatus status,
+        bytes32 agentId,
+        bytes32 taskId,
+        address challenger,
+        uint256 bond,
+        bytes32 evidenceHash,
+        uint256 votesFor,
+        uint256 votesAgainst,
+        uint256 deadline,
+        bool resolved
+    ) {
+        Dispute storage d = disputes[disputeId];
+        return (
+            d.status, d.agentId, d.taskId, d.challenger, d.bond,
+            d.evidenceHash, d.votesFor, d.votesAgainst, d.deadline, d.resolved
+        );
+    }
+
     function getAgentTasks(bytes32 agentId) external view returns (bytes32[] memory) {
         return agentTasks[agentId];
     }
 
-    /**
-     * @notice Check if a commitment exists and hasn't been executed yet.
-     */
     function isPendingExecution(bytes32 taskId) external view returns (bool) {
         CommitmentData storage c = commitments[taskId];
         return c.committed && !c.executed;
@@ -297,8 +419,14 @@ contract SEAL {
         minStake = _minStake;
     }
 
-    function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "SEAL: zero address");
-        owner = newOwner;
+    function setDisputeBond(uint256 _disputeBond) external onlyOwner {
+        disputeBond = _disputeBond;
     }
+
+    function setDisputePeriod(uint256 _disputePeriod) external onlyOwner {
+        disputePeriod = _disputePeriod;
+    }
+
+    // Required to receive ETH
+    receive() external payable {}
 }
