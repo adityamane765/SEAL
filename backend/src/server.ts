@@ -60,7 +60,7 @@ app.post('/api/hash-inputs', (req, res) => {
 // ── Full pipeline: reason → commit → execute ─────────────
 app.post('/api/pipeline', async (req, res) => {
   try {
-    const { input, systemPrompt } = req.body as { input: TEEInput; systemPrompt: string };
+    const { input, systemPrompt, authorizedAddress } = req.body as { input: TEEInput; systemPrompt: string; authorizedAddress: string };
     const agent = new SEALFluenceAgent(input.agentId, ANTHROPIC_API_KEY, GEMINI_API_KEY);
 
     // Stage 01+02: Attest inputs + Reason in TEE
@@ -70,7 +70,7 @@ app.post('/api/pipeline', async (req, res) => {
     const { attestation, commitment } = await agent.commitAndAttest(input, reasoning);
 
     // Seal blob (encrypt, pin to filecoin and encrypt key via Lit)
-    const sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot);
+    const sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot, authorizedAddress);
     await logAuditEntry({
       event: 'commit',
       agentId: input.agentId,
@@ -125,7 +125,8 @@ app.post('/api/demo/agent-to-agent', async (_req, res) => {
 app.post('/api/demo/credential-proof', async (_req, res) => {
   try {
     const demo = new CredentialProofDemo('cred-001', ANTHROPIC_API_KEY, GEMINI_API_KEY);
-    const result = await demo.runDemo('openai-api', 'gpt-4-access');
+    const { authorizedAddress } = _req.body as { authorizedAddress: string };
+    const result = await demo.runDemo('openai-api', 'gpt-4-access', authorizedAddress);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });

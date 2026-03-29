@@ -16,7 +16,8 @@ export class CredentialProofDemo {
 
   async runDemo(
     serviceName: string,
-    requiredPermission: string
+    requiredPermission: string,
+    authorizedAddress: string
   ): Promise<{
     proofId: string;
     credentialAttestation: any;
@@ -89,7 +90,7 @@ Output JSON with:
     // STEP 2: Generate access proof
     console.log('\nSTEP 2: Generate access proof for service');
     
-    const { txData, executionAttestation } = await this.agent.executeInTEE(
+    const { executionAttestation } = await this.agent.executeInTEE(
       credentialInput,
       reasoning,
       attestation
@@ -111,7 +112,7 @@ Output JSON with:
 
     // Seal reasoning blob + lit conditions
     console.log('\nSTEP 3: Seal blob + Lit Protocol access conditions');
-    const sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot);
+    const sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot, authorizedAddress);
     console.log('  Reasoning blob pinned to Filecoin:', sealed.cid);
 
     const litConditions = {
