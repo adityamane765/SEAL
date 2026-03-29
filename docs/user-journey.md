@@ -4,7 +4,7 @@
 
 **SĒAL (Secure Enclave Agent Layer)** · PL Genesis · March 2026
 
-Logic flows required for the hackathon demo, with status checkboxes.
+Feature coverage and user-journey logic flows for the hackathon demo, with status checkboxes.
 
 </div>
 
@@ -13,6 +13,7 @@ Logic flows required for the hackathon demo, with status checkboxes.
 ## Table of contents
 
 - [How to use this doc](#how-to-use-this-doc)
+- [Demo feature checklist](#demo-feature-checklist)
 - [Cross-cutting: demo infrastructure](#cross-cutting-demo-infrastructure)
 - [Journey 1 — DAO treasury agent](#journey-1--dao-treasury-agent)
 - [Journey 2 — Agent-to-agent pipeline](#journey-2--agent-to-agent-pipeline)
@@ -28,6 +29,27 @@ Logic flows required for the hackathon demo, with status checkboxes.
 
 Each journey maps to the **six-stage SEAL pipeline** described in the [README](../README.md) (attest inputs → reason in TEE → commit + attest → execute in TEE → guaranteed delivery → selective reveal). Code references: `backend/src/vignettes/` and `backend/src/server.ts`.
 
+The **feature checklist** below mirrors the [Features](../README.md#features) section in the README—check off what the demo must visibly prove for judges.
+
+---
+
+## Demo feature checklist
+
+| ID | Feature (README) | What the demo must show | Done |
+|----|------------------|-------------------------|------|
+| F1 | **Cryptographic input attestation** | Inputs (on-chain + external) hashed and surfaced before reasoning; poisoning narrative if relevant. | [ ] |
+| F2 | **Confidential reasoning** | Reasoning stays inside TEE path; no plaintext reasoning in public logs/APIs you expose. | [ ] |
+| F3 | **Commit-before-execute enforcement** | Contract or runtime gate: no execution narrative without commitment / nonce ordering story. | [ ] |
+| F4 | **Execution consistency proof** | Execution hash / attestation tied to same bundle as reasoning; “same decision → same action” story. | [ ] |
+| F5 | **Verified delivery** | Tx bytes or relayer path: committed vs delivered hash comparison or explicit mitigation. | [ ] |
+| F6 | **Selective, authorized reveal** | Lit (or equivalent) + who can decrypt; blob on Filecoin/Storacha with CID in commitment path. | [ ] |
+| F7 | **Economic stake enforcement** | NEAR credential NFT / registry / slash story—at least one live or clearly scripted path. | [ ] |
+| F8 | **Credential isolation (Lit vault)** | Agent proves tool/API access without exposing keys (credential-proof vignette). | [ ] |
+| F9 | **Merkle-batched commitments** | Merkle root shown on-chain or in logs; batched commitment story if gas is discussed. | [ ] |
+| F10 | **Sponsor integrations called out** | Lit, Filecoin/Storacha, NEAR, Flow (if used)—each named in deck or live demo. | [ ] |
+| F11 | **Stakeholder UI / audit path** | Dashboard or script: commitment viewer + reveal trigger + attestation inspect (can be minimal). | [ ] |
+| F12 | **TEE disclosure** | Mock vs production Nitro/TDX stated honestly per README. | [ ] |
+
 ---
 
 ## Cross-cutting: demo infrastructure
@@ -38,7 +60,7 @@ Each journey maps to the **six-stage SEAL pipeline** described in the [README](.
 | C2 | `.env` / `backend/.env` aligned with `backend/.env.example` (EVM RPC, keys, Lit, Storacha, LLM keys as needed). | [ ] |
 | C3 | SEAL contract deployed to chosen testnet; `SEAL_CONTRACT_ADDRESS` set. | [ ] |
 | C4 | Agent registration path exercised (e.g. NEAR credential NFT / registry) if shown in demo. | [ ] |
-| C5 | TEE runtime: mock attestation acceptable for demo per README disclosure; real Nitro/TDX if claiming production path. | [ ] |
+| C5 | TEE runtime: attestation acceptable for demo per README disclosure; real Nitro/TDX/Phala if claiming production path. | [ ] |
 | C6 | Backend demo server runs; health and vignette routes callable (`backend/src/server.ts`). | [ ] |
 | C7 | CLI vignette runner works (`backend/index.ts`) for scripted recordings. | [ ] |
 | C8 | Sponsor story clear: Lit (keys + access), Filecoin/Storacha (CIDs), NEAR (stake/registry), Flow (if micro-settlement shown). | [ ] |
