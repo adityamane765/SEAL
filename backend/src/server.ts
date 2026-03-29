@@ -69,15 +69,20 @@ app.post('/api/pipeline', async (req, res) => {
     // Stage 03: Commit + Attest
     const { attestation, commitment } = await agent.commitAndAttest(input, reasoning);
 
-    // Seal blob (encrypt, pin to filecoin and encrypt key via Lit)
-    const sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot, authorizedAddress);
-    await logAuditEntry({
-      event: 'commit',
-      agentId: input.agentId,
-      commitmentHash: commitment.merkleRoot,
-      timestamp: Date.now(),
-      metadata: { cid: sealed.cid, taskId: input.taskId }
-    });
+    // Seal blob (encrypt, pin to filecoin and encrypt key via Lit) — graceful
+    let sealed: { cid: string; url: string; encryptedKey: any; iv: string } | null = null;
+    try {
+      sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot, authorizedAddress);
+      await logAuditEntry({
+        event: 'commit',
+        agentId: input.agentId,
+        commitmentHash: commitment.merkleRoot,
+        timestamp: Date.now(),
+        metadata: { cid: sealed.cid, taskId: input.taskId }
+      });
+    } catch (storageErr: any) {
+      console.warn('Storage layer unavailable (Lit/Storacha):', storageErr.message);
+    }
 
     // Stage 04: Execute in TEE
     const { txData, executionAttestation } = await agent.executeInTEE(input, reasoning, attestation);
@@ -86,7 +91,7 @@ app.post('/api/pipeline', async (req, res) => {
       inputHash: reasoning.inputHash,
       reasoningHash: attestation.reasoningHash,
       commitment,
-      sealed: { cid: sealed.cid, url: sealed.url, encryptedKey: sealed.encryptedKey, iv: sealed.iv },
+      sealed: sealed ? { cid: sealed.cid, url: sealed.url, encryptedKey: sealed.encryptedKey, iv: sealed.iv } : null,
       execution: { txData, executionHash: executionAttestation.executionHash },
       attestationQuote: attestation.teeQuote,
       signature: attestation.signature
@@ -217,15 +222,20 @@ app.post('/api/pipeline-onchain', async (req, res) => {
     // Stage 03: Commit + Attest
     const { attestation, commitment } = await agent.commitAndAttest(input, reasoning);
 
-    // Seal blob (encrypt, pin to filecoin and encrypt key via Lit)
-    const sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot, authorizedAddress);
-    await logAuditEntry({
-      event: 'commit',
-      agentId: input.agentId,
-      commitmentHash: commitment.merkleRoot,
-      timestamp: Date.now(),
-      metadata: { cid: sealed.cid, taskId: input.taskId }
-    });
+    // Seal blob (encrypt, pin to filecoin and encrypt key via Lit) — graceful
+    let sealed: { cid: string; url: string; encryptedKey: any; iv: string } | null = null;
+    try {
+      sealed = await sealBlob(reasoning.reasoningBlob, commitment.merkleRoot, authorizedAddress);
+      await logAuditEntry({
+        event: 'commit',
+        agentId: input.agentId,
+        commitmentHash: commitment.merkleRoot,
+        timestamp: Date.now(),
+        metadata: { cid: sealed.cid, taskId: input.taskId }
+      });
+    } catch (storageErr: any) {
+      console.warn('Storage layer unavailable (Lit/Storacha):', storageErr.message);
+    }
 
     // Stage 03b: Submit commitment ON-CHAIN
     const taskIdBytes = ethers.id(commitment.taskId);
@@ -262,7 +272,7 @@ app.post('/api/pipeline-onchain', async (req, res) => {
         contractAddress: CONTRACT_ADDRESS,
         chain: 'base-sepolia'
       },
-      sealed: { cid: sealed.cid, url: sealed.url, encryptedKey: sealed.encryptedKey, iv: sealed.iv },
+      sealed: sealed ? { cid: sealed.cid, url: sealed.url, encryptedKey: sealed.encryptedKey, iv: sealed.iv } : null,
       execution: { txData, executionHash: executionAttestation.executionHash },
       attestationQuote: attestation.teeQuote,
       signature: attestation.signature

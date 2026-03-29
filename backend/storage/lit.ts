@@ -1,5 +1,5 @@
 import { createLitClient } from "@lit-protocol/lit-client";
-import { nagaTest } from "@lit-protocol/networks";
+import { nagaDev } from "@lit-protocol/networks";
 import { generateSessionKeyPair } from "@lit-protocol/crypto";
 import { ethers } from "ethers";
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
@@ -8,7 +8,7 @@ let litClient: Awaited<ReturnType<typeof createLitClient>> | null = null;
 
 async function getLit() {
   if (litClient) return litClient;
-  litClient = await createLitClient({ network: nagaTest });
+  litClient = await createLitClient({ network: nagaDev });
   return litClient;
 }
 
