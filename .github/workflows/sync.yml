@@ -1,0 +1,23 @@
+name: Sync to Railway Repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo A
+        uses: actions/checkout@v3
+
+      - name: Push to Repo B
+        run: |
+          git config --global user.name "sync-bot"
+          git config --global user.email "sync@github.com"
+
+          git remote add target https://x-access-token:${{ secrets.TARGET_REPO_TOKEN }}@github.com/exorcist073-svg/seal.git
+          
+          git push target main --force
