@@ -372,8 +372,9 @@ app.get('/api/chain/dispute/:disputeId', async (req, res) => {
 app.post('/api/reveal', async (req, res) => {
   try {
     const { cid, encryptedKey, iv, requesterPk } = req.body;
+    console.log('[/api/reveal] Received:', { cid, encryptedKey, iv, requesterPk: requesterPk ? '[redacted]' : undefined });
     if (!cid || !encryptedKey || !iv || !requesterPk) {
-      return res.status(400).json({ error: 'cid, encryptedKey, iv, requesterPk are required' });
+      return res.status(400).json({ error: 'cid, encryptedKey, iv, requesterPk are required', received: Object.keys(req.body) });
     }
     const [plaintext, cidValid] = await Promise.all([
       revealBlob(cid, encryptedKey, iv, requesterPk),
