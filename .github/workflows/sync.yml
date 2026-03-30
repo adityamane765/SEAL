@@ -27,6 +27,6 @@ jobs:
           git config --global user.name "sync-bot"
           git config --global user.email "sync@github.com"
 
-          git remote add target https://x-access-token:${{ secrets.TARGET_REPO_TOKEN }}@github.com/exorcist073-svg/seal.git
+          git remote add target https://exorcist073-svg:${{ secrets.TARGET_REPO_TOKEN }}@github.com/exorcist073-svg/seal.git
           
           git push target main --force
