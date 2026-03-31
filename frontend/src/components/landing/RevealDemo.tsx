@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { OnChainPanel } from "@/components/chain/OnChainPanel";
 import { sealApiBase } from "@/lib/wagmi-config";
 
 const stages = [
@@ -55,11 +54,9 @@ export function RevealDemo() {
           Authorized staker view
         </h2>
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[var(--muted)]">
-          Connect a wallet for Base Sepolia. The live panel reads the deployed SEAL contract and pings the TEE API
-          health endpoint; the cards below illustrate Lit-gated decryption and verification.
+          Go to the <a href="/dashboard" className="text-[#05058a] underline">Dashboard</a> to inspect on-chain state, view commitments, and reveal encrypted reasoning.
+          Connect a wallet for Base Sepolia to interact with the live SEAL contract.
         </p>
-
-        <OnChainPanel />
 
         <div className="mt-12 grid gap-8 lg:grid-cols-5">
           <div className="border border-[var(--border)] bg-(--surface) p-6 shadow-sm shadow-stone-900/5 lg:col-span-3">
