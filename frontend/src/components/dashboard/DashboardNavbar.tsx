@@ -10,24 +10,6 @@ const NAV = [
   { href: "/#contact", label: "Contact" },
 ];
 
-function CrosshairLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="28"
-      height="28"
-      viewBox="0 0 28 28"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden
-    >
-      <circle cx="14" cy="14" r="13" stroke="currentColor" strokeWidth="1" />
-      <line x1="14" y1="2" x2="14" y2="26" stroke="currentColor" strokeWidth="1" />
-      <line x1="2" y1="14" x2="26" y2="14" stroke="currentColor" strokeWidth="1" />
-    </svg>
-  );
-}
-
 export function DashboardNavbar() {
   const navClass =
     "text-[11px] uppercase tracking-[0.14em] text-white/70 transition-colors duration-300 ease-in-out hover:text-white";
@@ -39,7 +21,13 @@ export function DashboardNavbar() {
     >
       <div className="relative mx-auto flex max-w-[1440px] items-center justify-between gap-6 px-6 py-5">
         <Link href="/" className="flex min-w-0 items-center gap-3 text-white">
-          <CrosshairLogo className="shrink-0" />
+          <img
+            src="/logo_seal.svg"
+            alt="SEAL"
+            width={28}
+            height={28}
+            className="shrink-0"
+          />
           <span className="hidden truncate text-[11px] font-normal uppercase tracking-[0.22em] sm:inline">
             Secure Enclave Agent Layer
           </span>
@@ -61,7 +49,7 @@ export function DashboardNavbar() {
             href="/dashboard"
             className="hidden shrink-0 items-center justify-center bg-[#3535f0] px-4 py-2.5 text-[11px] font-normal tracking-[0.08em] text-white md:flex"
           >
-            dashboard
+            console
           </Link>
           <div className="hidden md:block">
             <ConnectButton chainStatus="icon" showBalance={false} />
