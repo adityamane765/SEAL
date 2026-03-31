@@ -41,8 +41,23 @@ export async function revealBlob(
 ): Promise<string> {
   const { decryptBlobKey, decryptBlob } = await import("./lit.js");
   const key = await decryptBlobKey(encryptedKey, requesterPk);
-  const res = await fetch(`https://${cid}.ipfs.w3s.link`);
-  if (!res.ok) throw new Error(`Failed to fetch blob: ${res.statusText}`);
-  const bytes = Buffer.from(await res.arrayBuffer());
-  return decryptBlob(bytes, key, Buffer.from(iv, "hex"));
+
+  // Try multiple IPFS gateways with timeout
+  const gateways = [
+    `https://${cid}.ipfs.w3s.link`,
+    `https://ipfs.io/ipfs/${cid}`,
+    `https://dweb.link/ipfs/${cid}`,
+  ];
+  let lastErr: Error | null = null;
+  for (const url of gateways) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) { lastErr = new Error(`${url}: ${res.statusText}`); continue; }
+      const bytes = Buffer.from(await res.arrayBuffer());
+      return decryptBlob(bytes, key, Buffer.from(iv, "hex"));
+    } catch (e: any) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`Failed to fetch blob from all gateways: ${lastErr?.message}`);
 }

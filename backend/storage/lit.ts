@@ -32,45 +32,6 @@ function stakerCondition(address: string) {
   ];
 }
 
-async function makeAuthContext(signerPk?: string) {
-  const signer = getSigner(signerPk);
-  const sessionKeyPair = generateSessionKeyPair();
-
-  const msg = `SEAL auth: ${Date.now()}`;
-  const sig = await signer.signMessage(msg);
-
-  const { LitAccessControlConditionResource } = await import("@lit-protocol/auth-helpers");
-  const { LIT_ABILITY } = await import("@lit-protocol/constants");
-
-  const authCallback = async () => ({
-    sig,
-    derivedVia: "web3.eth.personal.sign",
-    signedMessage: msg,
-    address: signer.address,
-  });
-
-  const authInfo = await authCallback();
-
-  return {
-    chain: "baseSepolia" as const,
-    sessionKeyPair,
-    authNeededCallback: authCallback,
-    authConfig: {
-      capabilityAuthSigs: [authInfo],
-      expiration: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
-      statement: "SEAL Protocol Access",
-      domain: "seal-protocol.io",
-      resources: [{ resource: "*", ability: "decryption" }],
-    },
-    resourceAbilityRequests: [
-      {
-        resource: new LitAccessControlConditionResource("*"),
-        ability: LIT_ABILITY.AccessControlConditionDecryption,
-      },
-    ],
-  } as any;
-}
-
 export interface EncryptedKey {
   ciphertext: string;
   dataToEncryptHash: string;
@@ -92,9 +53,56 @@ export async function decryptBlobKey(
   requesterPk: string
 ): Promise<Buffer> {
   const lit = await getLit();
-  const authContext = await makeAuthContext(requesterPk);
+  const signer = getSigner(requesterPk);
+  const sessionKeyPair = generateSessionKeyPair();
+  const requesterAddress = signer.address;
 
-  const requesterAddress = new ethers.Wallet(requesterPk).address;
+  const { LitAccessControlConditionResource, createSiweMessageWithResources } =
+    await import("@lit-protocol/auth-helpers");
+
+  // Resource ID = hash(accessControlConditions) + "/" + dataToEncryptHash
+  const accs = stakerCondition(requesterAddress);
+  const resourceId = await LitAccessControlConditionResource.generateResourceString(
+    accs,
+    encryptedKey.dataToEncryptHash
+  );
+  const resource = new LitAccessControlConditionResource(resourceId);
+
+  // authNeededCallback: SDK calls this to get a capability AuthSig
+  // Must return an AuthSig whose signedMessage is a SIWE string with ReCap + Expiration Time
+  const authNeededCallback = async () => {
+    const siweMessage = await createSiweMessageWithResources({
+      uri: `lit:session:${sessionKeyPair.publicKey}`,
+      walletAddress: signer.address,
+      nonce: randomBytes(16).toString("hex"),
+      chainId: 84532,
+      expiration: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
+      resources: [
+        { resource, ability: LIT_ABILITY.AccessControlConditionDecryption },
+      ],
+    });
+
+    const sig = await signer.signMessage(siweMessage);
+    return {
+      sig,
+      derivedVia: "web3.eth.personal.sign",
+      signedMessage: siweMessage,
+      address: signer.address,
+    };
+  };
+
+  // PKPAuthContextSchema: { chain, sessionKeyPair, authNeededCallback, authConfig }
+  // AuthConfigSchema fields all have defaults, but resources must match
+  const authContext = {
+    chain: "baseSepolia",
+    sessionKeyPair,
+    authNeededCallback,
+    authConfig: {
+      resources: [
+        { resource, ability: LIT_ABILITY.AccessControlConditionDecryption },
+      ],
+    },
+  };
 
   const { decryptedData } = await lit.decrypt({
     data: {
@@ -102,7 +110,7 @@ export async function decryptBlobKey(
       dataToEncryptHash: encryptedKey.dataToEncryptHash,
     },
     accessControlConditions: stakerCondition(requesterAddress),
-    authContext: authContext as any,
+    authContext,
   } as any);
 
   return Buffer.from(decryptedData);
