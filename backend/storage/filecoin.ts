@@ -42,7 +42,7 @@ export async function pinBlob(
   hash: string
 ): Promise<PinResult> {
   const client = await getStoracha();
-  const file = new File([blob.buffer as ArrayBuffer], `reasoning-${hash}.bin`, {
+  const file = new File([new Uint8Array(blob)], `reasoning-${hash}.bin`, {
     type: "application/octet-stream",
   });
   const cid = (await client.uploadFile(file)).toString();
