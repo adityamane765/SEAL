@@ -84,6 +84,32 @@ app.post('/api/pipeline', async (req, res) => {
       console.warn('Storage layer unavailable (Lit/Storacha):', storageErr.message);
     }
 
+    // Stage 03b: Submit commitment on-chain (if configured)
+    let onChainTx: { txHash: string; blockNumber: number } | null = null;
+    if (sealContract && sealed) {
+      try {
+        const taskIdBytes = ethers.id(input.taskId);
+        const merkleRootBytes = ethers.id(commitment.merkleRoot);
+        const quoteBytes = ethers.toUtf8Bytes(attestation.teeQuote);
+        
+        const tx = await sealContract.submitCommitment(
+          taskIdBytes,
+          merkleRootBytes,
+          quoteBytes,
+          commitment.nonce,
+          commitment.timestamp
+        );
+        const receipt = await tx.wait();
+        onChainTx = {
+          txHash: receipt.hash,
+          blockNumber: receipt.blockNumber
+        };
+        console.log(`On-chain: commitment submitted for ${input.taskId}, tx: ${receipt.hash}`);
+      } catch (chainErr: any) {
+        console.warn('On-chain submission failed:', chainErr.message);
+      }
+    }
+
     // Stage 04: Execute in TEE
     const { txData, executionAttestation } = await agent.executeInTEE(input, reasoning, attestation);
 
@@ -91,6 +117,7 @@ app.post('/api/pipeline', async (req, res) => {
       inputHash: reasoning.inputHash,
       reasoningHash: attestation.reasoningHash,
       commitment,
+      onChain: onChainTx,
       sealed: sealed ? { cid: sealed.cid, url: sealed.url, encryptedKey: sealed.encryptedKey, iv: sealed.iv } : null,
       execution: { txData, executionHash: executionAttestation.executionHash },
       attestationQuote: attestation.teeQuote,
