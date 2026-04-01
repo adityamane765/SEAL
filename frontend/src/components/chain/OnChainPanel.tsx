@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAccount, useChainId, useReadContract } from "wagmi";
 import { formatEther, isAddress, keccak256, stringToBytes } from "viem";
-import { baseSepolia } from "wagmi/chains";
 import { sealAbi } from "@/lib/seal-abi";
-import { sealApiBase, sealContractAddress } from "@/lib/wagmi-config";
+import { expectedChain, sealApiBase, sealContractAddress } from "@/lib/wagmi-config";
 
 type Health = { status: string; service?: string; timestamp?: number };
 
@@ -93,14 +92,14 @@ export function OnChainPanel() {
     };
   }, []);
 
-  const wrongChain = isConnected && chainId !== baseSepolia.id;
+  const wrongChain = isConnected && chainId !== expectedChain.id;
 
   return (
     <div className="mt-10 border border-[var(--border)] bg-[var(--surface-alt)] p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="seal-section-label">Live stack</p>
-          <h3 className="font-display mt-2 text-xl font-medium text-stone-900">Base Sepolia + SEAL contract</h3>
+          <h3 className="font-display mt-2 text-xl font-medium text-stone-900">Ethereum Sepolia + SEAL contract</h3>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--muted)]">
             Reads use your wallet RPC when connected. Set{" "}
             <code className="rounded-sm border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-xs text-stone-800">
@@ -126,7 +125,7 @@ export function OnChainPanel() {
 
       {wrongChain && (
         <p className="mt-4 border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          Switch network to Base Sepolia in your wallet to inspect contract state.
+          Switch network to Ethereum Sepolia in your wallet to inspect contract state.
         </p>
       )}
 

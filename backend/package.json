@@ -6,7 +6,8 @@
     "build": "tsc",
     "start": "tsx src/server.ts",
     "demo": "tsx index.ts",
-    "test": "vitest"
+    "test": "vitest",
+    "pipeline:onchain": "node scripts/run-pipeline-onchain.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

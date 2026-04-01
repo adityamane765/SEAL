@@ -41,15 +41,22 @@ export interface Commitment {
   timestamp: number;
 }
 
+function hasRealAnthropicKey(key: string): boolean {
+  const k = key?.trim() ?? '';
+  return k.length > 10 && !k.startsWith('sk-ant-dev-placeholder') && !k.startsWith('sk-ant-xxx');
+}
+
 export class SEALFluenceAgent {
   private anthropic: Anthropic;
   private gemini: GoogleGenerativeAI | null;
   private keyPair: { publicKey: string; privateKey: string };
   private agentId: string;
+  private useAnthropicFirst: boolean;
 
   constructor(agentId: string, anthropicApiKey: string, geminiApiKey?: string) {
     this.agentId = agentId;
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+    this.useAnthropicFirst = hasRealAnthropicKey(anthropicApiKey);
+    this.anthropic = new Anthropic({ apiKey: anthropicApiKey || 'sk-ant-placeholder' });
     this.gemini = geminiApiKey ? new GoogleGenerativeAI(geminiApiKey) : null;
     
     // Generate mock enclave keypair (in real Nitro, this comes from enclave)
@@ -86,22 +93,27 @@ export class SEALFluenceAgent {
     // Construct prompt with attested context
     const llmPrompt = this.constructPrompt(input, systemPrompt, inputHash);
     
-    // Call LLM inside the TEE (Claude primary, Gemini fallback)
+    // Claude when configured; otherwise Gemini-only (GEMINI_API_KEY in .env)
     let llmResponse: string;
-    try {
-      const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: llmPrompt }]
-      });
+    if (this.useAnthropicFirst) {
+      try {
+        const response = await this.anthropic.messages.create({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 4096,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: llmPrompt }]
+        });
 
-      llmResponse = response.content[0].type === 'text' 
-        ? response.content[0].text 
-        : '';
-    } catch (err: any) {
-      console.warn(`[SEAL] Claude API failed (${err.status || 'unknown'}), falling back to Gemini`);
+        llmResponse = response.content[0].type === 'text' ? response.content[0].text : '';
+      } catch (err: any) {
+        console.warn(`[SEAL] Claude API failed (${err.status || 'unknown'}), falling back to Gemini`);
+        if (!this.gemini) throw err;
+        llmResponse = await this.callGemini(systemPrompt, llmPrompt);
+      }
+    } else if (this.gemini) {
       llmResponse = await this.callGemini(systemPrompt, llmPrompt);
+    } else {
+      throw new Error('Set ANTHROPIC_API_KEY or GEMINI_API_KEY');
     }
 
     // Parse reasoning and execution plan from response

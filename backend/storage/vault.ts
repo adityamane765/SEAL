@@ -22,7 +22,7 @@ function ownerCondition(address: string) {
     {
       contractAddress: "",
       standardContractType: "" as const,
-      chain: "baseSepolia" as const,
+      chain: "sepolia" as const,
       method: "",
       parameters: [":userAddress"],
       returnValueTest: { comparator: "=" as const, value: address.toLowerCase() },
@@ -37,7 +37,7 @@ async function makeAuthContext(signerPk?: string) {
   const sig = await signer.signMessage(msg);
 
   return {
-    chain: "baseSepolia",
+    chain: "sepolia",
     sessionKeyPair,
     authNeededCallback: async () => ({
       sig,

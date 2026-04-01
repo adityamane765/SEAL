@@ -28,14 +28,19 @@ export class ContractIntegration {
    * Submit commitment to SEAL contract (Stage 03 output)
    * This is the critical handoff from TEE to chain
    */
-  async submitCommitment(commitment: Commitment): Promise<ethers.TransactionResponse> {
-    // Call SEAL contract's commit function
+  async submitCommitment(
+    commitment: Commitment,
+    agentIdBytes32: string
+  ): Promise<ethers.TransactionResponse> {
+    const taskIdBytes = ethers.id(commitment.taskId);
+    const merkleRootBytes = ethers.id(commitment.merkleRoot);
     const tx = await this.contract.submitCommitment(
-      commitment.taskId,
-      commitment.merkleRoot,
+      taskIdBytes,
+      merkleRootBytes,
       commitment.attestationQuote,
       commitment.nonce,
-      commitment.timestamp
+      commitment.timestamp,
+      agentIdBytes32
     );
     return tx;
   }
@@ -91,12 +96,12 @@ export class ContractIntegration {
 }
 
 /**
- * SEAL v2 Contract ABI — UUPS proxy on Base Sepolia
+ * SEAL v2 Contract ABI — UUPS proxy (e.g. Ethereum Sepolia)
  * Proxy: 0x9af9C6fe2a845354EcC3bDCe1af9c427Fb42Ed70
  */
 export const SEAL_CONTRACT_ABI = [
   // Events
-  "event CommitmentSubmitted(bytes32 indexed taskId, bytes32 merkleRoot, uint256 nonce, uint256 timestamp)",
+  "event CommitmentSubmitted(bytes32 indexed taskId, bytes32 indexed agentId, bytes32 merkleRoot, uint256 nonce, uint256 timestamp)",
   "event TaskExecuted(bytes32 indexed taskId, bytes32 executionHash, uint256 timestamp)",
   "event AgentRegistered(bytes32 indexed agentId, address indexed agentOwner, uint256 stake)",
   "event AgentSlashed(bytes32 indexed agentId, bytes32 indexed taskId, uint256 slashedAmount)",
@@ -109,7 +114,7 @@ export const SEAL_CONTRACT_ABI = [
   "function agents(bytes32 agentId) view returns (bool registered, uint256 nonce, uint256 stake, bool slashed, address agentOwner)",
 
   // Commit-attest-execute
-  "function submitCommitment(bytes32 taskId, bytes32 merkleRoot, bytes calldata attestationQuote, uint256 nonce, uint256 timestamp)",
+  "function submitCommitment(bytes32 taskId, bytes32 merkleRoot, bytes calldata attestationQuote, uint256 nonce, uint256 timestamp, bytes32 agentId)",
   "function verifyAttestation(bytes32 taskId, bytes calldata attestationQuote) view returns (bool)",
   "function executeTask(bytes32 taskId, bytes calldata txData, bytes32 executionHash, bytes calldata signature)",
 
@@ -117,8 +122,12 @@ export const SEAL_CONTRACT_ABI = [
   "function commitments(bytes32 taskId) view returns (bool committed, bool executed, bytes32 merkleRoot, uint256 nonce, bytes attestationQuote, uint256 timestamp, address submitter, bytes32 executionHash)",
   "function getCommitment(bytes32 taskId) view returns (bool committed, bool executed, bytes32 merkleRoot, uint256 nonce, uint256 timestamp, address submitter, bytes32 executionHash)",
   "function getNonce(bytes32 agentId) view returns (uint256)",
+  "function getAgentTasks(bytes32 agentId) view returns (bytes32[])",
   "function isPendingExecution(bytes32 taskId) view returns (bool)",
   "function isRegisteredStaker(address account) view returns (bool)",
+  "function registeredAgentCount() view returns (uint256)",
+  "function registeredAgentAt(uint256 index) view returns (bytes32)",
+  "function getRegisteredAgents() view returns (bytes32[])",
   "function incrementNonce(bytes32 agentId)",
 
   // Dispute resolution

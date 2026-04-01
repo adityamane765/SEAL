@@ -55,7 +55,7 @@ export function RevealDemo() {
         </h2>
         <p className="mt-6 max-w-2xl text-lg leading-relaxed text-[var(--muted)]">
           Go to the <a href="/dashboard" className="text-[#05058a] underline">Dashboard</a> to inspect on-chain state, view commitments, and reveal encrypted reasoning.
-          Connect a wallet for Base Sepolia to interact with the live SEAL contract.
+          Connect a wallet for Ethereum Sepolia to interact with the live SEAL contract.
         </p>
 
         <div className="mt-12 grid gap-8 lg:grid-cols-5">

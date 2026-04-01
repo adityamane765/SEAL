@@ -24,7 +24,7 @@ function stakerCondition(address: string) {
     {
       contractAddress: "",
       standardContractType: "" as const,
-      chain: "baseSepolia" as const,
+      chain: "sepolia" as const,
       method: "",
       parameters: [":userAddress"],
       returnValueTest: { comparator: "=" as const, value: address.toLowerCase() },
@@ -54,7 +54,7 @@ async function makeAuthContext(signerPk?: string) {
   const resource = new LitAccessControlConditionResource("*");
 
   return {
-    chain: "baseSepolia" as const,
+    chain: "sepolia" as const,
     sessionKeyPair,
     authNeededCallback: authCallback,
     authConfig: {
@@ -100,7 +100,7 @@ export async function decryptBlobKey(
   const requesterAddress = signer.address;
 
   const authCallback = async () => {
-    const msg = `localhost wants you to sign in with your Ethereum account:\n${signer.address}\n\nURI: http://localhost\nVersion: 1\nChain ID: 84532\nNonce: ${Date.now()}\nIssued At: ${new Date().toISOString()}\nExpiration Time: ${new Date(Date.now() + 3600000).toISOString()}`;
+    const msg = `localhost wants you to sign in with your Ethereum account:\n${signer.address}\n\nURI: http://localhost\nVersion: 1\nChain ID: 11155111\nNonce: ${Date.now()}\nIssued At: ${new Date().toISOString()}\nExpiration Time: ${new Date(Date.now() + 3600000).toISOString()}`;
     const sig = await signer.signMessage(msg);
     return {
       sig,
@@ -117,7 +117,7 @@ export async function decryptBlobKey(
     },
     accessControlConditions: stakerCondition(requesterAddress),
     authContext: {
-      chain: "baseSepolia",
+      chain: "sepolia",
       sessionKeyPair,
       authNeededCallback: authCallback,
     } as any,

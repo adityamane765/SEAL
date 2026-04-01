@@ -3,10 +3,9 @@
 import { useEffect, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useReadContract } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
-import { isAddress, formatEther } from "viem";
+import { isAddress } from "viem";
 import { sealAbi } from "@/lib/seal-abi";
-import { sealApiBase, sealContractAddress } from "@/lib/wagmi-config";
+import { expectedChain, sealApiBase, sealContractAddress } from "@/lib/wagmi-config";
 
 type Health = { status: string; service?: string; timestamp?: number };
 
@@ -24,7 +23,7 @@ export function OperatorsPanel() {
     query: { enabled: contractOk },
   });
 
-  const wrongChain = isConnected && chainId !== baseSepolia.id;
+  const wrongChain = isConnected && chainId !== expectedChain.id;
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -76,7 +75,7 @@ export function OperatorsPanel() {
       title: "Correct network",
       ok: !wrongChain,
       warn: isConnected && wrongChain,
-      detail: wrongChain ? "Switch to Base Sepolia" : "Base Sepolia",
+      detail: wrongChain ? `Switch to ${expectedChain.name}` : expectedChain.name,
     },
     {
       id: "04",
@@ -171,7 +170,7 @@ export function OperatorsPanel() {
                   Chain
                 </p>
                 <p className="mt-2 font-mono text-[11px] text-[#05058a]/70">
-                  Base Sepolia
+                  Ethereum Sepolia
                 </p>
               </div>
               <div className="border border-[#05058a]/15 bg-[#f5f5f0] px-4 py-3">

@@ -313,7 +313,7 @@ SEAL occupies a position no existing solution covers: simultaneously verifiable,
 ```bash
 node >= 18.0.0
 npm >= 9.0.0
-# A funded wallet on Base Sepolia or Arbitrum Sepolia testnet
+# A funded wallet on Ethereum Sepolia (or Arbitrum Sepolia) testnet
 # NEAR testnet account
 # Lit Protocol API key
 # Storacha / web3.storage account

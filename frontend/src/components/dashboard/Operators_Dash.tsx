@@ -1,14 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { OperatorRegisterTab } from "@/components/dashboard/operator/OperatorRegisterTab";
 import { OperatorMonitorTab } from "@/components/dashboard/operator/OperatorMonitorTab";
 import { OperatorAuditTab } from "@/components/dashboard/operator/OperatorAuditTab";
+import type { OperatorAgentRegistration } from "@/lib/operator-agent";
+import { loadOperatorAgent, saveOperatorAgent } from "@/lib/operator-agent";
 
 export function Operators_Dash() {
   const [tab, setTab] = useState<"register" | "monitor" | "audit">("register");
-  const [selectedActionId, setSelectedActionId] = useState("ACT-10291");
+  const [registeredAgent, setRegisteredAgent] = useState<OperatorAgentRegistration | null>(null);
+  const [selectedActionId, setSelectedActionId] = useState("");
+
+  useEffect(() => {
+    const saved = loadOperatorAgent();
+    setRegisteredAgent(saved);
+    if (saved) setTab("monitor");
+  }, []);
+
+  const handleRegistered = useCallback((reg: OperatorAgentRegistration) => {
+    setRegisteredAgent(reg);
+    saveOperatorAgent(reg);
+    setTab("monitor");
+  }, []);
+
+  const handleAgentFromMonitor = useCallback((reg: OperatorAgentRegistration) => {
+    setRegisteredAgent(reg);
+    saveOperatorAgent(reg);
+  }, []);
 
   return (
     <div className="w-full">
@@ -22,7 +42,7 @@ export function Operators_Dash() {
               Control room
             </h1>
             <p className="mt-4 max-w-[56rem] text-sm leading-relaxed text-[#05058a]/70">
-              Requires: EVM wallet connect + NEAR wallet connect.
+              Requires: EVM wallet + SEAL contract on the same network as the backend RPC.
             </p>
           </div>
 
@@ -62,13 +82,15 @@ export function Operators_Dash() {
 
       {tab === "register" ? (
         <div className="mt-6">
-          <OperatorRegisterTab />
+          <OperatorRegisterTab onRegistered={handleRegistered} />
         </div>
       ) : null}
 
       {tab === "monitor" ? (
         <div className="mt-6">
           <OperatorMonitorTab
+            registeredAgent={registeredAgent}
+            onLoadAgent={handleAgentFromMonitor}
             selectedActionId={selectedActionId}
             onSelectActionId={setSelectedActionId}
           />

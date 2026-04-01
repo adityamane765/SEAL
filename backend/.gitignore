@@ -20,6 +20,9 @@ Thumbs.db
 # Fluence
 .fluence/
 
+# Local audit / sealed persistence (dev)
+data/
+
 # Build artifacts
 *.js
 *.d.ts

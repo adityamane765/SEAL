@@ -51,6 +51,23 @@ contract SEALTest is Test {
         assertEq(agentOwner, address(this));
     }
 
+    function test_registeredAgents_enumeration() public {
+        bytes32 agent2 = keccak256("agent-002");
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.registerAgent{value: 0.01 ether}(agent2);
+        assertEq(seal.registeredAgentCount(), 2);
+        assertEq(seal.registeredAgentAt(0), AGENT_1);
+        assertEq(seal.registeredAgentAt(1), agent2);
+        bytes32[] memory all = seal.getRegisteredAgents();
+        assertEq(all.length, 2);
+    }
+
+    function test_revert_registeredAgentAt_oob() public {
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        vm.expectRevert("SEAL: index out of bounds");
+        seal.registeredAgentAt(1);
+    }
+
     function test_revert_registerAgent_alreadyRegistered() public {
         seal.registerAgent{value: 0.01 ether}(AGENT_1);
         vm.expectRevert("SEAL: already registered");
@@ -65,7 +82,8 @@ contract SEALTest is Test {
     // ── Commitment Submission ───────────────────────────
 
     function test_submitCommitment() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         (
             bool committed,
             bool executed,
@@ -84,29 +102,36 @@ contract SEALTest is Test {
         assertEq(submitter, address(this));
         assertEq(executionHash, bytes32(0));
         assertEq(seal.commitmentCount(), 1);
+        bytes32[] memory tasks = seal.getAgentTasks(AGENT_1);
+        assertEq(tasks.length, 1);
+        assertEq(tasks[0], TASK_1);
     }
 
     function test_revert_submitCommitment_alreadyCommitted() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         vm.expectRevert("SEAL: already committed");
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 2, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 2, block.timestamp, AGENT_1);
     }
 
     function test_revert_submitCommitment_emptyAttestation() public {
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
         vm.expectRevert("SEAL: empty attestation");
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, "", 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, "", 1, block.timestamp, AGENT_1);
     }
 
     // ── Attestation Verification ────────────────────────
 
     function test_verifyAttestation_valid() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         bool valid = seal.verifyAttestation(TASK_1, ATTESTATION_QUOTE);
         assertTrue(valid);
     }
 
     function test_verifyAttestation_wrongQuote() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         bytes memory wrongQuote = abi.encodePacked(
             "WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_WRONG_QUOTE_123"
         );
@@ -122,7 +147,8 @@ contract SEALTest is Test {
     // ── Task Execution ──────────────────────────────────
 
     function test_executeTask_afterCommitment() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
 
         (,bool executed,,,,, bytes32 executionHash) = seal.getCommitment(TASK_1);
@@ -137,7 +163,8 @@ contract SEALTest is Test {
     }
 
     function test_revert_executeTask_alreadyExecuted() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
         vm.expectRevert("SEAL: already executed");
         seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);
@@ -147,7 +174,7 @@ contract SEALTest is Test {
 
     function test_fullPipeline_commitThenExecute() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         bool valid = seal.verifyAttestation(TASK_1, ATTESTATION_QUOTE);
         assertTrue(valid);
@@ -165,7 +192,7 @@ contract SEALTest is Test {
 
     function test_raiseDispute() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         bytes32 evidenceHash = keccak256("fraud-evidence");
         vm.prank(challenger);
@@ -198,7 +225,7 @@ contract SEALTest is Test {
 
     function test_revert_raiseDispute_insufficientBond() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         vm.expectRevert("SEAL: insufficient dispute bond");
@@ -207,7 +234,7 @@ contract SEALTest is Test {
 
     function test_voteOnDispute() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
@@ -225,7 +252,7 @@ contract SEALTest is Test {
 
     function test_revert_voteOnDispute_alreadyVoted() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
@@ -240,7 +267,7 @@ contract SEALTest is Test {
 
     function test_revert_voteOnDispute_periodEnded() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
@@ -254,7 +281,7 @@ contract SEALTest is Test {
 
     function test_resolveDispute_slashAgent() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
@@ -288,7 +315,7 @@ contract SEALTest is Test {
 
     function test_resolveDispute_rejectDispute() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
@@ -316,7 +343,7 @@ contract SEALTest is Test {
 
     function test_revert_resolveDispute_periodNotEnded() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(challenger);
         uint256 disputeId = seal.raiseDispute{value: 0.005 ether}(AGENT_1, TASK_1, keccak256("ev"));
@@ -329,7 +356,7 @@ contract SEALTest is Test {
 
     function test_emergencySlash() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         uint256 ownerBalBefore = address(this).balance;
         seal.emergencySlash(AGENT_1, TASK_1);
@@ -343,7 +370,7 @@ contract SEALTest is Test {
 
     function test_revert_emergencySlash_notOwner() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
 
         vm.prank(address(0xDA0));
         vm.expectRevert();
@@ -352,7 +379,7 @@ contract SEALTest is Test {
 
     function test_revert_emergencySlash_alreadySlashed() public {
         seal.registerAgent{value: 0.1 ether}(AGENT_1);
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         seal.emergencySlash(AGENT_1, TASK_1);
 
         vm.expectRevert("SEAL: already slashed");
@@ -362,7 +389,8 @@ contract SEALTest is Test {
     // ── Pending Execution ───────────────────────────────
 
     function test_isPendingExecution() public {
-        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp);
+        seal.registerAgent{value: 0.01 ether}(AGENT_1);
+        seal.submitCommitment(TASK_1, MERKLE_ROOT, ATTESTATION_QUOTE, 1, block.timestamp, AGENT_1);
         assertTrue(seal.isPendingExecution(TASK_1));
 
         seal.executeTask(TASK_1, TX_DATA, EXEC_HASH, SIG_DATA);

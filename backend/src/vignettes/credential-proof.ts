@@ -116,7 +116,7 @@ Output JSON with:
     console.log('  Reasoning blob pinned to Filecoin:', sealed.cid);
 
     const litConditions = {
-      chain: 'baseSepolia',
+      chain: 'sepolia',
       cid: sealed.cid,
       url: sealed.url,
       encryptedKey: sealed.encryptedKey,

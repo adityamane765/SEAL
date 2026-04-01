@@ -3,10 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useReadContract } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
 import { formatEther, isAddress, keccak256, stringToBytes } from "viem";
 import { sealAbi } from "@/lib/seal-abi";
-import { sealApiBase, sealContractAddress } from "@/lib/wagmi-config";
+import { expectedChain, sealApiBase, sealContractAddress } from "@/lib/wagmi-config";
 import { OperatorsPanel } from "./operators";
 
 type RevealResult = { plaintext: string; cid: string } | null;
@@ -104,7 +103,7 @@ export function DashboardClient() {
     query: { enabled: contractOk && !!taskId },
   });
 
-  const wrongChain = isConnected && chainId !== baseSepolia.id;
+  const wrongChain = isConnected && chainId !== expectedChain.id;
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
@@ -189,7 +188,7 @@ export function DashboardClient() {
       title: "Correct network",
       ok: !wrongChain,
       warn: isConnected && wrongChain,
-      detail: wrongChain ? "Switch to Base Sepolia" : "Base Sepolia",
+      detail: wrongChain ? `Switch to ${expectedChain.name}` : expectedChain.name,
     },
     {
       id: "04",
@@ -340,12 +339,12 @@ export function DashboardClient() {
                   Live contract state
                 </p>
                 <p className="mt-2 text-sm text-[#05058a]/70">
-                  Reads from your wallet RPC when connected (Base Sepolia).
+                  Reads from your wallet RPC when connected ({expectedChain.name}).
                 </p>
               </div>
               {wrongChain && (
                 <span className="border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-950">
-                  Switch to Base Sepolia
+                  Switch to {expectedChain.name}
                 </span>
               )}
               {!contractOk && (

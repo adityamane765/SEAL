@@ -6,7 +6,7 @@ import "../src/SEAL.sol";
 
 contract UpgradeSEAL is Script {
     function run() external {
-        // Existing proxy address on Base Sepolia
+        // Existing proxy address on Ethereum Sepolia
         address proxy = 0x9af9C6fe2a845354EcC3bDCe1af9c427Fb42Ed70;
 
         vm.startBroadcast();

@@ -6,5 +6,10 @@ broadcast/
 # Dependencies
 lib/
 
+# Hardhat
+node_modules/
+hh-cache/
+hh-artifacts/
+
 # Env
 .env

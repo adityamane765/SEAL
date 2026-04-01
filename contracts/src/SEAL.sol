@@ -70,10 +70,14 @@ contract SEAL is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     // Lit Protocol: tracks addresses that have registered+staked an agent
     mapping(address => bool) public registeredStakers;
 
+    /// @notice Append-only list of agent ids (for enumeration; order = registration order)
+    bytes32[] private _registeredAgentIds;
+
     // ── Events ───────────────────────────────────────────
 
     event CommitmentSubmitted(
         bytes32 indexed taskId,
+        bytes32 indexed agentId,
         bytes32 merkleRoot,
         uint256 nonce,
         uint256 timestamp
@@ -153,6 +157,7 @@ contract SEAL is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         });
 
         registeredStakers[msg.sender] = true;
+        _registeredAgentIds.push(agentId);
         emit AgentRegistered(agentId, msg.sender, msg.value);
     }
 
@@ -163,10 +168,16 @@ contract SEAL is Initializable, UUPSUpgradeable, OwnableUpgradeable {
         bytes32 merkleRoot,
         bytes calldata attestationQuote,
         uint256 nonce,
-        uint256 timestamp
+        uint256 timestamp,
+        bytes32 agentId
     ) external {
         require(!commitments[taskId].committed, "SEAL: already committed");
         require(attestationQuote.length > 0, "SEAL: empty attestation");
+
+        AgentInfo storage agent = agents[agentId];
+        require(agent.registered, "SEAL: agent not registered");
+        require(msg.sender == agent.agentOwner, "SEAL: not agent owner");
+        require(!agent.slashed, "SEAL: agent slashed");
 
         commitments[taskId] = CommitmentData({
             committed: true,
@@ -179,9 +190,11 @@ contract SEAL is Initializable, UUPSUpgradeable, OwnableUpgradeable {
             executionHash: bytes32(0)
         });
 
+        agentTasks[agentId].push(taskId);
+
         commitmentCount++;
 
-        emit CommitmentSubmitted(taskId, merkleRoot, nonce, timestamp);
+        emit CommitmentSubmitted(taskId, agentId, merkleRoot, nonce, timestamp);
     }
 
     // ── Attestation Verification ─────────────────────────
@@ -419,6 +432,22 @@ contract SEAL is Initializable, UUPSUpgradeable, OwnableUpgradeable {
 
     function isRegisteredStaker(address account) external view returns (bool) {
         return registeredStakers[account];
+    }
+
+    /// @return count Number of registered agents (same as array length)
+    function registeredAgentCount() external view returns (uint256 count) {
+        return _registeredAgentIds.length;
+    }
+
+    /// @param index Index in registration order (0 .. count-1)
+    function registeredAgentAt(uint256 index) external view returns (bytes32) {
+        require(index < _registeredAgentIds.length, "SEAL: index out of bounds");
+        return _registeredAgentIds[index];
+    }
+
+    /// @notice Full list (may be large; prefer count + at for heavy UIs)
+    function getRegisteredAgents() external view returns (bytes32[] memory) {
+        return _registeredAgentIds;
     }
 
     // ── Admin ────────────────────────────────────────────

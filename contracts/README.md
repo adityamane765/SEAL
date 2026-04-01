@@ -1,66 +1,50 @@
-## Foundry
+## SEAL contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Solidity sources live in `src/`. You can build and test with **Foundry** or deploy with **Hardhat**.
 
-Foundry consists of:
+### Hardhat (recommended for deploy)
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+From `contracts/`:
 
-## Documentation
-
-https://book.getfoundry.sh/
-
-## Usage
-
-### Build
-
-```shell
-$ forge build
+```bash
+npm install
+npx hardhat compile
 ```
 
-### Test
+**Ethereum Sepolia** — add `contracts/.env`:
 
-```shell
-$ forge test
+```env
+PRIVATE_KEY=0x...
+SEPOLIA_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
 ```
 
-### Format
+Deploy:
 
-```shell
-$ forge fmt
+```bash
+npm run deploy:sepolia
 ```
 
-### Gas Snapshots
+Or on PowerShell: `. .\deploy-sepolia.ps1`
 
-```shell
-$ forge snapshot
+Copy the printed **proxy** address into `frontend/.env` as `NEXT_PUBLIC_SEAL_CONTRACT_ADDRESS` and `backend/.env` as `CONTRACT_ADDRESS` (same value). Set backend `RPC_URL` to your Sepolia HTTPS endpoint.
+
+**Local node** (e.g. `npx hardhat node` or Anvil on `8545`):
+
+```bash
+npx hardhat run scripts/deploy-sepolia.js --network localhost
 ```
 
-### Anvil
+### Foundry
 
 ```shell
-$ anvil
+forge build
+forge test
 ```
 
-### Deploy
+Deploy (requires Foundry installed):
 
 ```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+forge script script/Deploy.s.sol:DeploySEAL --rpc-url <your_rpc_url> --private-key <your_private_key>
 ```
 
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+See [Foundry book](https://book.getfoundry.sh/).

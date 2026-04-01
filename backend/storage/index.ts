@@ -16,6 +16,15 @@ export async function sealBlob(
   encryptedKey: import("./lit.js").EncryptedKey;
   iv: string;
 }> {
+  if (!process.env.STORACHA_PRINCIPAL?.trim() || !process.env.STORACHA_PROOF?.trim()) {
+    return {
+      cid: "",
+      url: "",
+      encryptedKey: { ciphertext: "", dataToEncryptHash: "" },
+      iv: "",
+    };
+  }
+
   const { pinBlob } = await import("./filecoin.js");
   const { encryptBlob, encryptBlobKey } = await import("./lit.js");
   const { encrypted, key, iv } = encryptBlob(reasoningBlob);
